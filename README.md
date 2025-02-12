@@ -6,6 +6,26 @@ This repository contains the code to reproduce the results of the exepriments pr
 
 <img src="https://github.com/kasia-kobalczyk/informed-meta-learning/blob/main/figure1.png?raw=true" width="800"/>
 
+For citations, use the following:
+```
+@inproceedings{
+kobalczyk2025towards,
+title={Towards Automated Knowledge Integration From Human-Interpretable Representations},
+author={Katarzyna Kobalczyk and Mihaela van der Schaar},
+booktitle={The Thirteenth International Conference on Learning Representations},
+year={2025},
+url={https://openreview.net/forum?id=NTHMw8S1Ow}
+}
+```
+
+## Setup
+
+The `environment.yaml` lists the required packages to reproduce the experiments presented in the paper. To install the evnironment run:
+
+`conda env create -f environment.yaml`
+
+`conda activate inps`
+
 ## Experiments with Synthetic Data
 `jobs/run_sinusoids.sh` contais commands that need to be run to reproduce the experiments with synthetic data 
 
