@@ -26,6 +26,7 @@ def _load_model(config, save_dir, load_it='best'):
     state_dict = torch.load(f'{save_dir}/model_{load_it}.pt')
     model.load_state_dict(state_dict)
     return model
+    
 
 def load_model(save_dir, load_it='best'):
     config = Config()
@@ -91,11 +92,10 @@ def uniform_sampler(num_targets, num_context):
 
 def get_summary_df(model_dict, config_dict, data_loader, eval_type_ls, model_names, sampler=uniform_sampler):
     # Evaluate the models on different knowledge types
-    loss = NLL()
+    loss = NLL(reduction="none")
 
     losses = {}
     outputs_dict = {}
-    data_knowledge = {}
 
     num_context_ls = [0, 1, 3, 5, 10, 15]
     for model_name in model_names:
@@ -126,10 +126,9 @@ def get_summary_df(model_dict, config_dict, data_loader, eval_type_ls, model_nam
             x_target = x_target.to(config.device)
             y_target = y_target.to(config.device)
             
-            sample_idx = sampler(x_target.shape[1], max(num_context_ls))
-            
-            for _ in range(3):
-                for num_context in num_context_ls:
+            for num_context in num_context_ls:
+                for _ in range(3):
+                    sample_idx = sampler(x_target.shape[1], max(num_context_ls))
                     x_context = x_target[:, sample_idx[:num_context], :]
                     y_context = y_target[:, sample_idx[:num_context], :]
                 
@@ -164,7 +163,7 @@ def get_summary_df(model_dict, config_dict, data_loader, eval_type_ls, model_nam
                             else:
                                 continue
                             outputs = tuple([o.cpu() if isinstance(o, torch.Tensor) else o for o in outputs])
-                            loss_value = loss.get_loss(outputs[0], outputs[1], outputs[2], outputs[3], y_target)
+                            loss_value, _, _ = loss.get_loss(outputs[0], outputs[1], outputs[2], outputs[3], y_target)
                             losses[model_name][eval_type][num_context].append(loss_value)
                             outputs_dict[model_name][eval_type][num_context].append({
                                 'outputs': outputs, 
@@ -249,26 +248,37 @@ def get_uncertainties(outputs_dict, num_context_ls, knowledge_type_ls, model_nam
     return uncertainties
 
 
-def get_auc_summary(losses, model_name, eval_type_ls, num_context_ls):
+def get_auc_summary(losses, model_names_ls, eval_type_ls, num_context_ls):
     auc_summary = {}
     auc_values = {}
     improvement = {}
 
     for eval_type in eval_type_ls:
-        base = -torch.stack([torch.concat(losses[model_name]['raw'][num_context]) for num_context in num_context_ls]).cpu().numpy()
-        informed = -torch.stack([torch.concat(losses[model_name][eval_type][num_context]) for num_context in num_context_ls]).cpu().numpy()
+        base = -torch.stack([
+            torch.stack([
+                torch.concat(losses[m]['raw'][num_context]) 
+                for num_context in num_context_ls
+            ])
+        for m in model_names_ls]).reshape(len(num_context_ls), -1).cpu()
+        informed = -torch.stack([
+            torch.stack([
+                torch.concat(losses[m][eval_type][num_context]) 
+                for num_context in num_context_ls
+            ])
+        for m in model_names_ls]).reshape(len(num_context_ls), -1).cpu()
         N = base.shape[-1]
         # estimate the area under the curve with the trapezoidal rule
         base_auc = np.array([auc(num_context_ls, base[:, i]) for i in range(N)])
         informed_auc = np.array([auc(num_context_ls, informed[:, i]) for i in range(N)])
         improvement[eval_type] = (
-            [((informed[i, :] - base[i, :]) / -base[i, :]).mean() for i in range(len(num_context_ls))],
-            [bootstrap(((informed[i, :] - base[i, :]) / -base[i, :],), np.mean, confidence_level=0.9).standard_error for i in range(len(num_context_ls))]
+            [((informed[i, :] - base[i, :]) / np.abs(base[i, :])).mean() for i in range(len(num_context_ls))],
+            [bootstrap(((informed[i, :] - base[i, :]) / np.abs(base[i, :]),), np.mean, confidence_level=0.9).standard_error for i in range(len(num_context_ls))]
         )
-        auc_values[eval_type] = (informed_auc - base_auc) / -base_auc
+        auc_values[eval_type] = (informed_auc - base_auc) / np.abs(base_auc)
         auc_summary[eval_type] = (
             np.mean(auc_values[eval_type]),
-            bootstrap((auc_values[eval_type], ), np.mean, confidence_level=0.9).standard_error
+            np.std(auc_values[eval_type]) / np.sqrt(N),
+            #bootstrap((auc_values[eval_type], ), np.mean, confidence_level=0.9).standard_error
         )
     
     return auc_summary, improvement
